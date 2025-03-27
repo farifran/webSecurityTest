@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Teste de Segurança de Entrada</title>
+    <script src="xssProtection.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Segoe+UI:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Teste de Segurança de Entrada</h1>
+        <div id="formContainer">
+            <form id="securityTestForm">
+                <div>
+                    <label for="textInput">Texto:</label>
+                    <input type="text" name="textInput" id="textInput" placeholder="Insira um texto" aria-label="Entrada de texto" aria-describedby="textDesc">
+                    <small id="textDesc">Insira um texto para sanitização</small>
+                </div>
+                <div>
+                    <label for="numberInput">Número:</label>
+                    <input type="text" name="numberInput" id="numberInput" placeholder="Insira um número" aria-label="Entrada de número" aria-describedby="textDesc">
+                    <small id="numberDesc">Insira um número válido</small>
+                </div>
+                <div>
+                    <label for="alphaInput">Alfanumérico:</label>
+                    <input type="text" name="alphaInput" id="alphaInput" placeholder="Insira texto alfanumérico" aria-label="Entrada alfanumérica" aria-describedby="alphaDesc">
+                    <small id="alphaDesc">Insira texto com letras e números</small>
+                </div>
+                <div>
+                    <label for="urlInput">URL:</label>
+                    <input type="text" name="urlInput" id="urlInput" placeholder="Insira uma URL" aria-label="Entrada de URL" aria-describedby="urlDesc">
+                    <small id="urlDesc">Insira uma URL válida</small>
+                </div>
+                <div>
+                    <button type="submit" aria-label="Testar entradas">Testar</button>
+                    <button type="button" class="random-test-button" id="randomTestButton" aria-label="Gerar teste aleatório">Teste Aleatório</button>
+                </div>
+            </form>
+            <div id="results">
+                <h3>Resultado</h3>
+            </div>
+        </div>
+        <h2>Lista de Teste:</h2>
+        <div id="tabelaContainer"></div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const form = document.querySelector('#securityTestForm');
+            const resultsDiv = document.querySelector('#results');
+            const textInput = document.querySelector('#textInput');
+            const numberInput = document.querySelector('#numberInput');
+            const alphaInput = document.querySelector('#alphaInput');
+            const urlInput = document.querySelector('#urlInput');
+            const randomTestButton = document.querySelector('#randomTestButton');
+
+            // Carregar os dados da lista de testes
+            fetch('testList.html')
+                .then(response => response.text())
+                .then(data => {
+                    document.getElementById('tabelaContainer').innerHTML = data;
+                })
+                .catch(error => console.error('Erro ao carregar a lista:', error));
+
+        function getTestData() {
+                const data = [];
+                const rows = document.querySelectorAll('#tabelaContainer tr');
+                for (let i = 1; i < rows.length; i++) {
+                    const cells = rows[i].querySelectorAll('td');
+                    if (cells.length === 4) {
+                        data.push({
+                            type: cells[0].textContent.trim(),
+                            value: cells[1].textContent.trim(),
+                            expected: cells[2].textContent.trim(),
+                            description: cells[3].textContent.trim()
+                        });
+                    }
+                }
+                return data;
+        }
+
+        function compareWithExpected(type, result, testData) {
+                const test = testData.find(t => t.type === type && t.value === result.original);
+                if (test) {
+                    return result.sanitized === test.expected ? `<br>✅ Sucesso` : `<br>❌ Esperado: ${test.expected}`;
+                }
+                return '';
+        }
+
+            form.addEventListener('submit', (event) => {
+                event.preventDefault();
+                const testData = getTestData();
+                try {
+                    const textVal = textInput.value;
+                    const numberVal = numberInput.value;
+                    const alphaVal = alphaInput.value;
+                    const urlVal = urlInput.value;
+
+                    const textResult = { original: textVal, sanitized: sanitizeInput(textVal) };
+                    const numberResult = { original: numberVal, sanitized: sanitizeInput(numberVal, 'number') };
+                    const alphaResult = { original: alphaVal, sanitized: sanitizeInput(alphaVal) };
+                    const urlResult = { original: urlVal, sanitized: sanitizeURL(urlVal) };
+
+                    resultsDiv.innerHTML = `
+                        <h3>Resultado</h3>
+                        <p><strong>Texto obtido:</strong> ${textResult.sanitized}${compareWithExpected('Texto', textResult, testData)}</p>
+                        <p><strong>Número Obtido:</strong> ${numberResult.sanitized}${compareWithExpected('Número', numberResult, testData)}</p>
+                        <p><strong>Alfanumérico Obtido:</strong> ${alphaResult.sanitized}${compareWithExpected('Alfanumérico', alphaResult, testData)}</p>
+                        <p><strong>URL Obtida:</strong> ${urlResult.sanitized}${compareWithExpected('URL', urlResult, testData)}</p>
+                    `;
+                    resultsDiv.classList.add('show');
+                } catch (e) {
+                    resultsDiv.innerHTML = `<p class="error">Erro: ${e.message}</p>`;
+                    resultsDiv.classList.remove('show');
+                }
+            });
+
+            randomTestButton.addEventListener('click', () => {
+                const testData = getTestData();
+                if (testData.length === 0) return;
+                const randomIndex = Math.floor(Math.random() * testData.length);
+                const test = testData[randomIndex];
+                textInput.value = test.type === 'Texto' ? test.value : '';
+                numberInput.value = test.type === 'Número' ? test.value : '';
+                alphaInput.value = test.type === 'Alfanumérico' ? test.value : '';
+                urlInput.value = test.type === 'URL' ? test.value : '';
+                form.requestSubmit();
+            });
+        });
+    </script>
+</body>
+</html>

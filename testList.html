@@ -1,0 +1,289 @@
+<!-- lista.html -->
+<table id="test">
+    <thead>
+        <tr>
+            <th>Tipo de Entrada</th>
+            <th>Valor de Teste</th>
+            <th>Valor Esperado</th>
+            <th>Descrição</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>Texto</td>
+            <td>&lt;script&gt;alert('XSS');&lt;/script&gt;</td>
+            <td>&amp;lt;script&amp;gt;alert('XSS');&amp;lt;/script&amp;gt;</td>
+            <td>XSS Attack</td>
+        </tr>
+        <tr>
+            <td>Número</td>
+            <td>123abc456</td>
+            <td>123</td>
+            <td>Mistura de letras e números</td>
+        </tr>
+        <tr>
+            <td>Alfanumérico</td>
+            <td>abc123xyz!@#</td>
+            <td>abc123xyz</td>
+            <td>Caracteres especiais</td>
+        </tr>
+        <tr>
+            <td>URL</td>
+            <td>javascript:alert('XSS')</td>
+            <td>#</td>
+            <td>Javascript como URL</td>
+        </tr>
+        <tr>
+            <td>URL</td>
+            <td>https://www.google.com</td>
+            <td>https://www.google.com</td>
+            <td>URL válida</td>
+        </tr>
+        <tr>
+            <td>URL</td>
+            <td>data:text/html,&lt;script&gt;alert('XSS')&lt;/script&gt;</td>
+            <td>#</td>
+            <td>Data URL XSS</td>
+        </tr>
+        <tr>
+            <td>Texto</td>
+            <td>" & ' &lt; &gt; `</td>
+            <td>&amp;quot; &amp;amp; &amp;#x27; &amp;lt; &amp;gt; &amp;#x60;</td>
+            <td>Entidades HTML</td>
+        </tr>
+        <tr>
+            <td>Número</td>
+            <td>-12.5abc</td>
+            <td>-12.5</td>
+            <td>Número negativo com texto</td>
+        </tr>
+        <tr>
+            <td>Alfanumerico</td>
+            <td>teste123teste</td>
+            <td>teste123teste</td>
+            <td>Teste alfanumerico</td>
+        </tr>
+        <tr>
+            <td>Texto</td>
+            <td>  Testando espaço no começo e no final  </td>
+            <td>  Testando espaço no começo e no final  </td>
+            <td>Espaços inicial e final</td>
+        </tr>
+        <tr>
+            <td>Texto</td>
+            <td>Quebra de linha\n dentro do texto</td>
+            <td>Quebra de linha\n dentro do texto</td>
+            <td>Quebra de linha</td>
+        </tr>
+        <tr>
+            <td>Texto</td>
+            <td>Tabulação\t no texto</td>
+            <td>Tabulação\t no texto</td>
+            <td>Tabulação</td>
+        </tr>
+        <tr>
+            <td>Número</td>
+            <td>1.2.3</td>
+            <td>1.2</td>
+            <td>Múltiplos pontos</td>
+        </tr>
+        <tr>
+            <td>Número</td>
+            <td>1,234.56</td>
+            <td>1234.56</td>
+            <td>Vírgula como separador decimal</td>
+        </tr>
+        <tr>
+            <td>Alfanumérico</td>
+            <td>  TESTE123  </td>
+            <td>TESTE123</td>
+            <td>Espaços</td>
+        </tr>
+        <tr>
+            <td>Alfanumérico</td>
+            <td>Caracteres especiais na string !@#$%^&amp;*()</td>
+            <td>Caracteresespeciaisnastring</td>
+            <td>Caracteres especiais</td>
+        </tr>
+        <tr>
+            <td>URL</td>
+            <td>http://example.com/path?param=value&amp;param2=value2</td>
+            <td>http://example.com/path?param=value&amp;param2=value2</td>
+            <td>URL com parâmetros</td>
+        </tr>
+        <tr>
+            <td>URL</td>
+            <td>https://subdomain.example.com/</td>
+            <td>https://subdomain.example.com/</td>
+            <td>Subdomínio</td>
+        </tr>
+        <tr>
+            <td>URL</td>
+            <td>ftp://ftp.example.com</td>
+            <td>ftp://ftp.example.com</td>
+            <td>Protocolo FTP</td>
+        </tr>
+        <tr>
+            <td>URL</td>
+            <td>//example.com</td>
+            <td>//example.com</td>
+            <td>URL relativo</td>
+        </tr>
+        <tr>
+            <td>Texto</td>
+            <td>&lt;div style="position:absolute;left:0;top:0;width:100%;height:100%;background-color:white;"&gt;&lt;/div&gt;</td>
+            <td>&amp;lt;div style="position:absolute;left:0;top:0;width:100%;height:100%;background-color:white;"&amp;gt;&amp;lt;/div&amp;gt;</td>
+            <td>CSS Injection</td>
+        </tr>
+        <tr>
+            <td>Texto</td>
+            <td>Teste com \"aspas\\"</td>
+            <td>Teste com "aspas"</td>
+            <td>Aspas escapadas</td>
+        </tr>
+        <tr>
+            <td>Texto</td>
+             <td>' or 1=1 -- </td>
+            <td>' or 1=1 -- </td>
+            <td>SQL Injection</td>
+        </tr>
+        <tr>
+            <td>Número</td>
+            <td>1e10</td>
+            <td>1e10</td>
+            <td>Notação científica</td>
+        </tr>
+         <tr>
+            <td>Número</td>
+            <td>0xFF</td>
+            <td>255</td>
+            <td>Valor hexadecimal</td>
+        </tr>
+        <tr>
+            <td>Alfanumérico</td>
+            <td>混合文字列123</td>
+            <td>123</td>
+            <td>String mista (caracteres latinos e não latinos)</td>
+        </tr>
+        <tr>
+            <td>URL</td>
+            <td>https://www.example.com/search?q=test&amp;page=1</td>
+            <td>https://www.example.com/search?q=test&amp;page=1</td>
+            <td>URL com múltiplos parâmetros</td>
+        </tr>
+        <tr>
+            <td>URL</td>
+            <td>/teste/teste</td>
+            <td>/teste/teste</td>
+            <td>Path Relativo</td>
+        </tr>
+        <tr>
+            <td>Texto</td>
+            <td>&lt;TABLE BORDER=1&gt;&lt;TR&gt;&lt;TD&gt;Test&lt;/TD&gt;&lt;/TR&gt;&lt;/TABLE&gt;</td>
+            <td>&amp;lt;TABLE BORDER=1&amp;gt;&amp;lt;TR&amp;gt;&amp;lt;TD&amp;gt;Test&amp;lt;/TD&amp;gt;&amp;lt;/TR&amp;gt;&amp;lt;/TABLE&amp;gt;</td>
+            <td>HTML Injection</td>
+        </tr>
+        <tr>
+            <td>Texto</td>
+            <td>Testando formatação de texto &lt;b&gt;negrito&lt;/b&gt; e &lt;i&gt;itálico&lt;/i&gt;</td>
+            <td>Testando formatação de texto &amp;lt;b&amp;gt;negrito&amp;lt;/b&amp;gt; e &lt;i&amp;gt;itálico&lt;/i&amp;gt;</td>
+            <td>Formatação de texto</td>
+        </tr>
+        <tr>
+            <td>Texto</td>
+            <td>Teste de quebra de linha com br &lt;br&gt;</td>
+            <td>Teste de quebra de linha com br &amp;lt;br&amp;gt;</td>
+            <td>Quebra de linha com BR</td>
+        </tr>
+        <tr>
+            <td>Número</td>
+            <td>100000000000000000000</td>
+            <td>100000000000000000000</td>
+            <td>Número muito grande</td>
+        </tr>
+        <tr>
+            <td>Número</td>
+            <td>-100000000000000000000</td>
+            <td>-100000000000000000000</td>
+            <td>Número negativo muito grande</td>
+        </tr>
+        <tr>
+            <td>Alfanumérico</td>
+            <td>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789</td>
+            <td>ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789</td>
+            <td>String alfanumérica completa</td>
+        </tr>
+        <tr>
+            <td>Alfanumérico</td>
+            <td>Teste com caracteres acentuados áéíóúçãõ</td>
+            <td>Testecomcaracteresacentuadosaeioucao</td>
+            <td>Caracteres acentuados</td>
+        </tr>
+         <tr>
+            <td>URL</td>
+            <td>https://www.example.com/verylongpath/verylongpath/verylongpath/verylongpath/verylongpath/index.html</td>
+            <td>https://www.example.com/verylongpath/verylongpath/verylongpath/verylongpath/verylongpath/index.html</td>
+            <td>URL muito longa</td>
+        </tr>
+        <tr>
+            <td>URL</td>
+            <td>https://www.example.com#fragment</td>
+            <td>https://www.example.com#fragment</td>
+            <td>URL com fragmento</td>
+        </tr>
+        <tr>
+            <td>Texto</td>
+            <td>Teste com emoji 😃👍</td>
+            <td>Teste com emoji 😃👍</td>
+            <td>Teste com emoji</td>
+        </tr>
+        <tr>
+            <td>Texto</td>
+            <td>Teste com caractere unicode 𝔄</td>
+            <td>Teste com caractere unicode 𝔄</td>
+            <td>Teste com caractere unicode</td>
+        </tr>
+        <tr>
+            <td>Texto</td>
+            <td>Teste de texto com múltiplas linhas\n\n\n</td>
+            <td>Teste de texto com múltiplas linhas\n\n\n</td>
+            <td>Múltiplas linhas</td>
+        </tr>
+        <tr>
+            <td>Número</td>
+            <td>+12345</td>
+            <td>12345</td>
+            <td>Número com sinal positivo</td>
+        </tr>
+        <tr>
+            <td>Número</td>
+            <td>1,000,000.00</td>
+            <td>1000000.00</td>
+            <td>Número com separador de milhar e decimal</td>
+        </tr>
+        <tr>
+            <td>Alfanumérico</td>
+            <td>1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ</td>
+            <td>1234567890abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ</td>
+            <td>Todos os caracteres alfanuméricos</td>
+        </tr>
+        <tr>
+            <td>Alfanumérico</td>
+            <td>テスト123テスト</td>
+            <td>123</td>
+            <td>String com caracteres japoneses</td>
+        </tr>
+        <tr>
+            <td>URL</td>
+            <td>https://user:password@www.example.com</td>
+            <td>https://user:password@www.example.com</td>
+            <td>URL com autenticação</td>
+        </tr>
+        <tr>
+            <td>URL</td>
+          <td>https://www.example.com:8080</td>
+          <td>https://www.example.com:8080</td>
+          <td>URL com porta</td>
+        </tr>
+    </tbody>
+</table>
