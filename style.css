@@ -51,20 +51,54 @@ label {
     font-size: 0.9rem;
 }
 
-input[type="text"] {
+/* ===== AJUSTE E ADIÇÃO AQUI ===== */
+/* Aplica estilos base a todos os tipos de input relevantes */
+input[type="text"],
+input[type="number"],
+input[type="url"] {
     width: 100%;
     padding: 0.75rem;
     border: 1px solid #e2e3e4;
     border-radius: 6px;
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
     font-size: 1rem;
+    /* Remove aparência específica do navegador (como setas em type=number) */
+    -moz-appearance: textfield; /* Firefox */
+    appearance: textfield; /* Padrão, mas pode não remover tudo sozinho */
 }
 
-input[type="text"]:focus {
+/* Remove especificamente as setas em navegadores WebKit (Chrome, Safari, Edge, Opera) */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0; /* Garante que não haja espaço extra */
+}
+
+/* Aplica estilos de foco a todos os tipos */
+input[type="text"]:focus,
+input[type="number"]:focus,
+input[type="url"]:focus {
     outline: none;
     border-color: #1a5276;
     box-shadow: 0 0 0 3px rgba(26, 82, 118, 0.1);
 }
+
+/* ===== FIM DO AJUSTE ===== */
+
+
+/* ===== ADIÇÃO AQUI ===== */
+/* Remove a estilização de validação padrão do navegador (ex: borda vermelha/brilho) */
+input:invalid {
+    box-shadow: none; /* Remove o brilho/sombra padrão de inválido */
+}
+/* Você pode adicionar seus próprios estilos para :invalid se desejar um feedback visual */
+/* Exemplo:
+input:not(:placeholder-shown):invalid {
+    border-color: #e74c3c;
+}
+*/
+/* ======================= */
+
 
 button {
     padding: 0.75rem 1.5rem;
