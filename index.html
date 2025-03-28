@@ -55,192 +55,192 @@
 document.addEventListener('DOMContentLoaded', () => {
             console.log("DOM carregado. Inicializando script de teste.");
 
-            // Tenta obter as funções do módulo (adapte se não forem globais)
-            const sec = window; // Assume global - Mude se usar módulo: const sec = await import('./securityModule.js');
-            const _getElement = typeof sec.getElement === 'function' ? sec.getElement : (sel => document.querySelector(sel));
-            const _escapeHtml = typeof sec.escapeHtml === 'function' ? sec.escapeHtml : (input => input); // Fallback inseguro!
-            const _cleanNumber = typeof sec.cleanNumber === 'function' ? sec.cleanNumber : (input => input);
-            const _cleanText = typeof sec.cleanText === 'function' ? sec.cleanText : (input => String(input ?? '').trim());
-            const _safeInnerHTML = typeof sec.safeInnerHTML === 'function' ? sec.safeInnerHTML : ((el, c) => { if(el) el.textContent = c; }); // Fallback textContent
+        // Tenta obter as funções do módulo (adapte se não forem globais)
+        const sec = window; // Assume global - Mude se usar módulo: const sec = await import('./securityModule.js');
+        const _getElement = typeof sec.getElement === 'function' ? sec.getElement : (sel => document.querySelector(sel));
+        const _escapeHtml = typeof sec.escapeHtml === 'function' ? sec.escapeHtml : (input => input); // Fallback inseguro!
+        const _cleanNumber = typeof sec.cleanNumber === 'function' ? sec.cleanNumber : (input => input);
+        const _cleanText = typeof sec.cleanText === 'function' ? sec.cleanText : (input => String(input ?? '').trim());
+        const _safeInnerHTML = typeof sec.safeInnerHTML === 'function' ? sec.safeInnerHTML : ((el, c) => { if(el) el.textContent = c; }); // Fallback textContent
 
-            // Seleciona elementos com verificação
-            const form = _getElement('#securityTestForm');
-            const resultsDiv = _getElement('#results');
-            const textInput = _getElement('#textInput');
-            const numberInput = _getElement('#numberInput');
-            const alphaInput = _getElement('#alphaInput');
-            const urlInput = _getElement('#urlInput');
-            const randomTestButton = _getElement('#randomTestButton');
-            const tabelaContainer = _getElement('#tabelaContainer');
+        // Seleciona elementos com verificação
+        const form = _getElement('#securityTestForm');
+        const resultsDiv = _getElement('#results');
+        const textInput = _getElement('#textInput');
+        const numberInput = _getElement('#numberInput');
+        const alphaInput = _getElement('#alphaInput');
+        const urlInput = _getElement('#urlInput');
+        const randomTestButton = _getElement('#randomTestButton');
+        const tabelaContainer = _getElement('#tabelaContainer');
 
-            // Verifica se todos os elementos essenciais foram encontrados
-            if (!form || !resultsDiv || !textInput || !numberInput || !alphaInput || !urlInput || !randomTestButton || !tabelaContainer) {
-                console.error("SECURITY MODULE TEST: Falha ao inicializar. Um ou mais elementos do DOM não foram encontrados.");
-                if(tabelaContainer) safeInnerHTML(tabelaContainer, '<p class="error">Erro: Falha ao carregar elementos da página.</p>');
-                return; // Interrompe a execução se elementos cruciais faltarem
-            }
-            console.log("Elementos do DOM encontrados.");
+        // Verifica se todos os elementos essenciais foram encontrados
+        if (!form || !resultsDiv || !textInput || !numberInput || !alphaInput || !urlInput || !randomTestButton || !tabelaContainer) {
+            console.error("SECURITY MODULE TEST: Falha ao inicializar. Um ou mais elementos do DOM não foram encontrados.");
+            if(tabelaContainer) safeInnerHTML(tabelaContainer, '<p class="error">Erro: Falha ao carregar elementos da página.</p>');
+            return; // Interrompe a execução se elementos cruciais faltarem
+        }
+        console.log("Elementos do DOM encontrados.");
 
-            let testDataCache = []; // Cache para os dados de teste
+        let testDataCache = []; // Cache para os dados de teste
 
-            // Função para buscar e processar dados de teste
-            async function loadAndProcessTestData() {
-                try {
-                    const response = await fetch('testList.html');
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    const data = await response.text();
-
-                    // **SEGURANÇA IMPORTANTE**: Assumindo que testList.html é SEGURO.
-                    // Se não for, use DOMPurify aqui ANTES do innerHTML.
-                    tabelaContainer.innerHTML = data;
-                    console.log("testList.html carregado no container.");
-
-                    // Processa os dados da tabela APÓS inserção no DOM
-                    const rows = tabelaContainer.querySelectorAll('tbody tr'); // Foca no corpo da tabela
-                    const parsedData = [];
-                    rows.forEach(row => {
-                        const cells = row.querySelectorAll('td');
-                        if (cells.length >= 3) {
-                            parsedData.push({
-                                type: cells[0].textContent?.trim() ?? '',
-                                value: cells[1].textContent?.trim() ?? '',
-                                expected: cells[2].textContent?.trim() ?? '',
-                                // description: cells[3]?.textContent?.trim() ?? ''
-                            });
-                        } else {
-                            console.warn("Linha da tabela ignorada (formato inválido):", row);
-                        }
-                    });
-                    testDataCache = parsedData; // Atualiza o cache
-                    console.log("Dados de teste processados:", testDataCache);
-                    if (testDataCache.length === 0) {
-                         console.warn("Nenhum dado de teste válido encontrado na tabela.");
-                         safeInnerHTML(tabelaContainer, '<p class="error">Nenhum dado de teste válido encontrado.</p>');
-                    }
-                     // Habilita botão de teste aleatório APÓS carregar dados
-                     randomTestButton.disabled = (testDataCache.length === 0);
-
-                } catch (error) {
-                    console.error('Erro ao carregar ou processar a lista de testes:', error);
-                    if (tabelaContainer) safeInnerHTML(tabelaContainer, `<p class="error">Erro ao carregar lista de testes: ${_escapeHtml(error.message)}</p>`);
-                     randomTestButton.disabled = true; // Desabilita se falhar
+        // Função para buscar e processar dados de teste
+        async function loadAndProcessTestData() {
+            try {
+                const response = await fetch('testList.html');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
-            }
+                const data = await response.text();
 
-            // Função auxiliar para criar e adicionar parágrafos de resultado de forma segura
-            function addResultParagraph(parent, label, resultData, tests) {
-                const p = document.createElement('p');
-                const strong = document.createElement('strong');
-                strong.textContent = `${label}: `;
-                p.appendChild(strong);
-                p.appendChild(document.createTextNode(String(resultData.sanitized ?? 'null')));
+                // **SEGURANÇA IMPORTANTE**: Assumindo que testList.html é SEGURO.
+                // Se não for, use DOMPurify aqui ANTES do innerHTML.
+                tabelaContainer.innerHTML = data;
+                console.log("testList.html carregado no container.");
 
-                const test = tests.find(t => t.type === label && t.value === resultData.original);
-                if (test) {
-                    const br = document.createElement('br');
-                    const span = document.createElement('span');
-                    const sanitizedStr = String(resultData.sanitized ?? 'null');
-                    const expectedStr = String(test.expected ?? 'null');
-
-                    if (sanitizedStr === expectedStr) {
-                        span.innerHTML = '✅ Sucesso';
-                        span.style.color = 'green';
+                // Processa os dados da tabela APÓS inserção no DOM
+                const rows = tabelaContainer.querySelectorAll('tbody tr'); // Foca no corpo da tabela
+                const parsedData = [];
+                rows.forEach(row => {
+                    const cells = row.querySelectorAll('td');
+                    if (cells.length >= 3) {
+                        parsedData.push({
+                            type: cells[0].textContent?.trim() ?? '',
+                            value: cells[1].textContent?.trim() ?? '',
+                            expected: cells[2].textContent?.trim() ?? '',
+                            // description: cells[3]?.textContent?.trim() ?? ''
+                        });
                     } else {
-                        span.style.color = 'red';
-                        span.appendChild(document.createTextNode('❌ Esperado: '));
-                        _safeInnerHTML(span, expectedStr); // Usa safeInnerHTML do módulo
+                        console.warn("Linha da tabela ignorada (formato inválido):", row);
                     }
-                    p.appendChild(br);
-                    p.appendChild(span);
-                } else {
-                     // Adiciona um aviso se nenhum teste correspondente foi encontrado
-                     const br = document.createElement('br');
-                     const spanWarn = document.createElement('span');
-                     spanWarn.style.fontStyle = 'italic';
-                     spanWarn.style.fontSize = 'small';
-                     spanWarn.textContent = '(Sem caso de teste correspondente)';
-                     p.appendChild(br);
-                     p.appendChild(spanWarn);
-                }
-                parent.appendChild(p);
-            }
-
-            // --- Event Listeners ---
-
-            form.addEventListener('submit', (event) => {
-                console.log("Formulário submetido (JS).");
-                event.preventDefault(); // Previne o envio real
-                // const currentTestData = getTestData(); // Pega do cache
-                resultsDiv.innerHTML = ''; // Limpa resultados
-                resultsDiv.classList.remove('show', 'error');
-
-                try {
-                    const textVal = textInput.value;
-                    const numberVal = numberInput.value;
-                    const alphaVal = alphaInput.value;
-                    const urlVal = urlInput.value;
-
-                    // Aplica limpeza/sanitização
-                    const textResult = { original: textVal, sanitized: _cleanText(textVal) };
-                    const numberResult = { original: numberVal, sanitized: _cleanNumber(numberVal) };
-                    const alphaResult = { original: alphaVal, sanitized: _cleanText(alphaVal) };
-                    const urlResult = { original: urlVal, sanitized: _cleanText(urlVal) }; // Limpeza básica para URL
-
-                    // Cria cabeçalho
-                    const h3 = document.createElement('h3');
-                    h3.textContent = 'Resultado';
-                    resultsDiv.appendChild(h3);
-
-                    // Adiciona resultados
-                    addResultParagraph(resultsDiv, 'Texto', textResult, testDataCache);
-                    addResultParagraph(resultsDiv, 'Número', numberResult, testDataCache);
-                    addResultParagraph(resultsDiv, 'Alfanumérico', alphaResult, testDataCache);
-                    addResultParagraph(resultsDiv, 'URL', urlResult, testDataCache);
-
-                    resultsDiv.classList.add('show');
-                } catch (e) {
-                    console.error("Erro durante o submit:", e);
-                    resultsDiv.innerHTML = '';
-                    const pError = document.createElement('p');
-                    pError.className = 'error';
-                    _safeInnerHTML(pError, `Erro inesperado: ${e.message}`); // Usa _safeInnerHTML
-                    resultsDiv.appendChild(pError);
-                    resultsDiv.classList.add('show');
-                }
-            });
-
-            randomTestButton.addEventListener('click', () => {
-                console.log("Botão Teste Aleatório clicado.");
-                // const currentTestData = getTestData(); // Pega do cache
+                });
+                testDataCache = parsedData; // Atualiza o cache
+                console.log("Dados de teste processados:", testDataCache);
                 if (testDataCache.length === 0) {
-                    console.warn("Nenhum dado de teste disponível para teste aleatório.");
-                    return;
+                     console.warn("Nenhum dado de teste válido encontrado na tabela.");
+                     safeInnerHTML(tabelaContainer, '<p class="error">Nenhum dado de teste válido encontrado.</p>');
                 }
-                const randomIndex = Math.floor(Math.random() * testDataCache.length);
-                const test = testDataCache[randomIndex];
-                console.log("Aplicando teste aleatório:", test);
+                 // Habilita botão de teste aleatório APÓS carregar dados
+                 randomTestButton.disabled = (testDataCache.length === 0);
 
-                // Preenche os campos
-                textInput.value = test.type === 'Texto' ? test.value : 'Texto Padrão';
-                numberInput.value = test.type === 'Número' ? test.value : '100';
-                alphaInput.value = test.type === 'Alfanumérico' ? test.value : 'AlfaDefault1';
-                urlInput.value = test.type === 'URL' ? test.value : 'https://padrao.com';
+            } catch (error) {
+                console.error('Erro ao carregar ou processar a lista de testes:', error);
+                if (tabelaContainer) safeInnerHTML(tabelaContainer, `<p class="error">Erro ao carregar lista de testes: ${_escapeHtml(error.message)}</p>`);
+                 randomTestButton.disabled = true; // Desabilita se falhar
+            }
+        }
 
-                // Dispara o evento submit do formulário
-                console.log("Disparando submit do formulário...");
-                form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
-                // NÃO use form.submit() ou form.requestSubmit() aqui, pois eles tentariam
-                // enviar o formulário de verdade ou acionar a validação HTML nativa.
-                // Queremos apenas acionar nosso listener JS.
-            });
+        // Função auxiliar para criar e adicionar parágrafos de resultado de forma segura
+        function addResultParagraph(parent, label, resultData, tests) {
+            const p = document.createElement('p');
+            const strong = document.createElement('strong');
+            strong.textContent = `${label}: `;
+            p.appendChild(strong);
+            p.appendChild(document.createTextNode(String(resultData.sanitized ?? 'null')));
 
-            // --- Inicialização ---
-            randomTestButton.disabled = true; // Desabilita até os dados carregarem
-            loadAndProcessTestData(); // Carrega os dados de teste ao iniciar
+            const test = tests.find(t => t.type === label && t.value === resultData.original);
+            if (test) {
+                const br = document.createElement('br');
+                const span = document.createElement('span');
+                const sanitizedStr = String(resultData.sanitized ?? 'null');
+                const expectedStr = String(test.expected ?? 'null');
 
+                if (sanitizedStr === expectedStr) {
+                    span.innerHTML = '✅ Sucesso';
+                    span.style.color = 'green';
+                } else {
+                    span.style.color = 'red';
+                    span.appendChild(document.createTextNode('❌ Esperado: '));
+                    _safeInnerHTML(span, expectedStr); // Usa safeInnerHTML do módulo
+                }
+                p.appendChild(br);
+                p.appendChild(span);
+            } else {
+                 // Adiciona um aviso se nenhum teste correspondente foi encontrado
+                 const br = document.createElement('br');
+                 const spanWarn = document.createElement('span');
+                 spanWarn.style.fontStyle = 'italic';
+                 spanWarn.style.fontSize = 'small';
+                 spanWarn.textContent = '(Sem caso de teste correspondente)';
+                 p.appendChild(br);
+                 p.appendChild(spanWarn);
+            }
+            parent.appendChild(p);
+        }
+
+        // --- Event Listeners ---
+
+        form.addEventListener('submit', (event) => {
+            console.log("Formulário submetido (JS).");
+            event.preventDefault(); // Previne o envio real
+            // const currentTestData = getTestData(); // Pega do cache
+            resultsDiv.innerHTML = ''; // Limpa resultados
+            resultsDiv.classList.remove('show', 'error');
+
+            try {
+                const textVal = textInput.value;
+                const numberVal = numberInput.value;
+                const alphaVal = alphaInput.value;
+                const urlVal = (urlInput.value);
+
+                // Aplica limpeza/sanitização
+                const textResult = { original: textVal, sanitized: _cleanText(textVal) };
+                const numberResult = { original: numberVal, sanitized: _cleanNumber(numberVal) };
+                const alphaResult = { original: alphaVal, sanitized: _cleanText(alphaVal) };
+                const urlResult = { original: urlVal, sanitized: _cleanText(urlVal) }; // Limpeza básica para URL
+
+                // Cria cabeçalho
+                const h3 = document.createElement('h3');
+                h3.textContent = 'Resultado';
+                resultsDiv.appendChild(h3);
+
+                // Adiciona resultados
+                addResultParagraph(resultsDiv, 'Texto', textResult, testDataCache);
+                addResultParagraph(resultsDiv, 'Número', numberResult, testDataCache);
+                addResultParagraph(resultsDiv, 'Alfanumérico', alphaResult, testDataCache);
+                addResultParagraph(resultsDiv, 'URL', urlResult, testDataCache);
+
+                resultsDiv.classList.add('show');
+            } catch (e) {
+                console.error("Erro durante o submit:", e);
+                resultsDiv.innerHTML = '';
+                const pError = document.createElement('p');
+                pError.className = 'error';
+                _safeInnerHTML(pError, `Erro inesperado: ${e.message}`); // Usa _safeInnerHTML
+                resultsDiv.appendChild(pError);
+                resultsDiv.classList.add('show');
+            }
         });
+
+        randomTestButton.addEventListener('click', () => {
+            console.log("Botão Teste Aleatório clicado.");
+            // const currentTestData = getTestData(); // Pega do cache
+            if (testDataCache.length === 0) {
+                console.warn("Nenhum dado de teste disponível para teste aleatório.");
+                return;
+            }
+            const randomIndex = Math.floor(Math.random() * testDataCache.length);
+            const test = testDataCache[randomIndex];
+            console.log("Aplicando teste aleatório:", test);
+
+            // Preenche os campos
+            textInput.value = test.type === 'Texto' ? test.value : 'Texto Padrão';
+            numberInput.value = test.type === 'Número' ? test.value : '100';
+            alphaInput.value = test.type === 'Alfanumérico' ? test.value : 'AlfaDefault1';
+            urlInput.value = test.type === 'URL' ? test.value : 'https://padrao.com';
+
+            // Dispara o evento submit do formulário
+            console.log("Disparando submit do formulário...");
+            form.dispatchEvent(new Event('submit', { cancelable: true, bubbles: true }));
+            // NÃO use form.submit() ou form.requestSubmit() aqui, pois eles tentariam
+            // enviar o formulário de verdade ou acionar a validação HTML nativa.
+            // Queremos apenas acionar nosso listener JS.
+        });
+
+        // --- Inicialização ---
+        randomTestButton.disabled = true; // Desabilita até os dados carregarem
+        loadAndProcessTestData(); // Carrega os dados de teste ao iniciar
+
+    });
     </script>
 </body>
 </html>
