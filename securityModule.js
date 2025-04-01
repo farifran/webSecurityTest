@@ -14,6 +14,16 @@
  * Posicione este script no <head> antes de qualquer outro script.
  * =============================================================================
  */
+(function(window) {
+  // --- Bloco de Guarda: Previne re-execução ---
+  if (window.__securityEssentialsLoaded) {
+      console.warn("SECURITY ESSENTIALS: Módulo já carregado. Ignorando re-execução.");
+      return;
+  }
+  // --- Fim Bloco de Guarda ---
+
+  // Objeto para expor a API pública
+  const SecurityEssentials = {};
 
 /**
  * Mapa de caracteres para escapar em conteúdo HTML.
