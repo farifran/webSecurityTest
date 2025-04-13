@@ -1,826 +1,396 @@
-
--------------
-
-/**
- * =============================================================================
- * securityModule.js - Módulo de Segurança Client-Side Essencial (KISS)
- * =============================================================================
- * Implementa proteções fundamentais de segurança front-end seguindo a filosofia
- * KISS (Keep It Simple, Stupid). Fornece ferramentas essenciais para:
- * - Prevenção de XSS (Cross-Site Scripting)
- * - Configuração automática de CSP (Content Security Policy)
- * - Carregamento seguro de scripts externos com SRI
- * - Sanitização e validação de entrada de dados
- * - Suporte a Trusted Types para navegadores modernos
- *
- * Aviso: Esta função é auto-executável e aplica CSP imediatamente.
- * Posicione este script no <head> antes de qualquer outro script.
- * =============================================================================
- */
-(function() {
-  // Previne re-execução
-  if (window.__securityModuleLoaded) {
-      return;
-  }
-
-/**
- * Mapa de caracteres para escapar em conteúdo HTML.
- * Cada caractere especial é mapeado para sua entidade HTML correspondente.
- * @private
- */
-
-const HTML_ESCAPE_MAP = {
-  '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;',
-  "'": '&#39;', // Usando Hex consistente
-  '`': '&#96;', // Usando Hex consistente
-  '/': '&#47;', // Usando Hex consistente
-  // Substitui LS/PS por espaço para prevenir quebra de strings JS e ataques baseados em caracteres Unicode
-  '\u2028': ' ', // Line Separator - pode quebrar strings JS e causar XSS se não tratado
-  '\u2029': ' '  // Paragraph Separator - mesmo problema do LS
-};
-
-  /** @private Regex para caracteres de controle ASCII C0/C1 (exceto HT, LF, CR). */
-  const CONTROL_CHARS_REGEX = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
-
-  /** @private Protocolos URL seguros para Trusted Types createScriptURL. Apenas HTTPS. */
-  // Removed unused constant ALLOWED_SCRIPT_URL_PROTOCOLS
-
-  /** @private Rastreia scripts já carregados/tentados para evitar duplicação. */
-  const loadedScripts = new Set(); // ÚNICA declaração
-/**
-* Lista de protocolos de URL considerados seguros para uso geral.
-* Usado por sanitizeURL e na política Trusted Types.
-* @private
-* @type {string[]}
-*/
-const ALLOWED_PROTOCOLS = [
-  'https:',
-  'http:', // Permitido, mas HTTPS é preferível
-  'mailto:',
-  'ftp:' // Inclua apenas se necessário
-  // Nota: URLs relativas (ex: '/path', 'page.html') são tratadas implicitamente
-  // pelo construtor URL e herdam o protocolo da página atual,
-  // sendo geralmente seguras no contexto certo.
-];
-  // --- Funções Utilitárias Internas ---
-
-  /**
-   * Escapa caracteres HTML para prevenir XSS.
-   * @private
-   * @param {*} input - Valor a escapar.
-   * @returns {string} String segura para HTML.
-   */
-  function escapeHtml(input) {
-      const str = String(input ?? '');
-      // Usa a constante de mapa definida acima
-      return str.replace(/[&<>"'`/\u2028\u2029]/g, c => HTML_ESCAPE_MAP[c]);
-  }
-
-  /**
-   * Sanitiza e valida uma URL, verificando o protocolo.
-   * @private
-   * @param {string} urlInput - URL a validar.
-   * @param {string[]} allowedProtocols - Lista de protocolos permitidos (ex: ['https:', 'mailto:']).
-   * @returns {string | null} URL validada e trimada ou null se inválida/insegura.
-   */
-  function sanitizeURL(urlInput, allowedProtocols) {
-      const strTrimmed = String(urlInput ?? '').trim();
-      if (!strTrimmed) return null;
-
-      try {
-          const parsedURL = new URL(strTrimmed, window.location.origin);
-          // Verifica o protocolo apenas se for uma URL absoluta
-          if (parsedURL.protocol && !allowedProtocols.includes(parsedURL.protocol.toLowerCase())) {
-               console.warn(`SEC_MOD: Blocked URL protocol: ${parsedURL.protocol}`);
-               return null;
-          }
-          return strTrimmed; // Retorna a string original trimada se válida
-      } catch (e) {
-          // Falha para URLs malformadas ou com protocolos inválidos como 'javascript:'
-          console.warn(`SEC_MOD: Invalid/Malformed URL: ${strTrimmed}`);
-          return null;
-      }
-  }
-
-  /**
-   * Converte input para número finito ou retorna null. Rejeita "123xyz".
-   * @private Usado internamente ou exportado se necessário.
-   * @param {*} input - Valor a converter.
-   * @returns {number | null} Número ou null.
-   */
-  function cleanNumber(input) {
-      const strInput = String(input ?? '').trim();
-      // Regex: opcional +/-, seguido por dígitos, opcionalmente com um ponto decimal
-      if (strInput === '' || !/^[+-]?(\d+|\d*\.\d+|\d+\.)$/.test(strInput)) return null;
-      const num = parseFloat(strInput);
-      return isFinite(num) ? num : null;
-  }
-
-  /**
-   * Gera nonce criptograficamente seguro (32 bytes / 256 bits, hex).
-   * @private
-   * @returns {string} Nonce ou 'CRYPTO_ERROR'.
-   */
-  function generateNonce() {
-      try {
-          const buffer = new Uint8Array(32);
-          window.crypto.getRandomValues(buffer);
-          return Array.from(buffer, byte => byte.toString(16).padStart(2, '0')).join('');
-      } catch (e) {
-          console.error("SEC_MOD: CRITICAL FAILURE - crypto.getRandomValues unavailable/failed.", e);
-          return 'CRYPTO_ERROR';
-      }
-  }
-
-  /**
-   * Verifica se a URL é válida para carregar como script (HTTPS ou relativa).
-   * @private Usado por loadExternalScript.
-   * @param {string} url - A URL a ser verificada.
-   * @returns {string | null} A URL trimada se válida, senão null.
-   */
-  function validateScriptSrc(url) {
-      const trimmed = String(url ?? '').trim();
-      // Permite https:// OU começando com / OU ./ OU ../
-      const isValid = trimmed && (trimmed.startsWith('https://') || /^[./]/.test(trimmed));
-      if (!isValid && trimmed) { // Loga apenas se inválida E não vazia
-          console.error(`SEC_MOD: Invalid protocol/path for script: ${trimmed}. Use HTTPS or relative.`);
-      }
-      return isValid ? trimmed : null;
-  }
-
-
-  // --- Funções de Segurança Principais (Algumas Exportadas) ---
-
-  /**
-   * Limpa texto: trim, opcionalmente remove controle chars, limita tamanho.
-   * @param {*} input - Valor a limpar.
-   * @param {number} [maxLength=1000] - Tamanho máximo.
-   * @param {boolean} [removeControlChars=false] - Remover C0/C1?
-   * @returns {string} Texto limpo.
-   */
-  function cleanText(input, maxLength = 1000, removeControlChars = false) {
-      let str = String(input ?? '');
-      if (removeControlChars) {
-          str = str.replace(CONTROL_CHARS_REGEX, '');
-      }
-      return str.trim().slice(0, Math.max(0, maxLength));
-  }
-
-  /**
-   * Aplica CSP básico via meta tag. Executado na inicialização.
-   * @private
-   */
-  function applyBasicCSP() {
-      if (document.querySelector('meta[http-equiv="Content-Security-Policy"]')) {
-          console.warn("SEC_MOD: CSP meta tag already exists. Skipping application.");
-          return;
-      }
-      const scriptNonce = generateNonce();
-      const styleNonce = generateNonce();
-      if (scriptNonce === 'CRYPTO_ERROR' || styleNonce === 'CRYPTO_ERROR') return;
-
-      // Política Base: Restritiva. Modifique via Headers HTTP para customizar.
-      const cspPolicy = [
-          "default-src 'none'",
-          "script-src 'self' 'strict-dynamic' 'nonce-" + scriptNonce + "'",
-          "style-src 'self' 'nonce-" + styleNonce + "' https://fonts.googleapis.com", // Permite Google Fonts (opcional)
-          "font-src 'self' https://fonts.gstatic.com", // Necessário para Google Fonts
-          "img-src 'self' data:", // Imagens: self, data URIs
-          "connect-src 'self'",
-          "form-action 'self'",
-          "base-uri 'none'",
-          "frame-ancestors 'none'", // Menos eficaz em meta tag
-          "object-src 'none'",
-          (window.trustedTypes ? "require-trusted-types-for 'script';" : "")
-      ].filter(Boolean).join('; ');
-
-      const meta = document.createElement('meta');
-      meta.httpEquiv = 'Content-Security-Policy';
-      meta.content = cspPolicy;
-
-      if (document.head) {
-           document.head.prepend(meta); // Tenta aplicar o mais cedo possível
-      } else {
-           console.error("SEC_MOD: Failed to apply CSP - document.head not found.");
-      }
-  }
-
-  /**
-   * Define cookie seguro (SameSite=Strict, Secure em HTTPS). HttpOnly via servidor!
-   * @param {string} name - Nome (não vazio).
-   * @param {*} value - Valor (convertido p/ string).
-   * @param {number} [days=7] - Duração em dias (0=sessão).
-   * @param {string} [path='/'] - Path (default '/').
-   */
-  function setSecureCookie(name, value, days = 7, path = '/') {
-      const trimmedName = String(name ?? '').trim();
-      if (!trimmedName) {
-          console.error('SEC_MOD: Invalid cookie name.'); return;
-      }
-      if (value === undefined || value === null) {
-         console.error(`SEC_MOD: Invalid cookie value for '${trimmedName}'.`); return;
-      }
-      const validPath = (typeof path === 'string' && (path === '' || path.startsWith('/'))) ? path : '/';
-
-      let expiresAttribute = '';
-      if (days && typeof days === 'number' && days > 0) {
-          const date = new Date();
-          date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-          expiresAttribute = `; expires=${date.toUTCString()}`;
-      }
-      const secureAttribute = window.location.protocol === 'https:' ? '; Secure' : '';
-      document.cookie = `${encodeURIComponent(trimmedName)}=${encodeURIComponent(String(value))}${expiresAttribute}; path=${validPath}${secureAttribute}; SameSite=Strict`;
-  }
-
-  /**
-   * Carrega script externo com segurança (HTTPS/relativo, SRI, fallback). KISS version.
-   * @param {string} src - URL principal do script.
-   * @param {object} [options={}] - Opções: { integrity?, crossorigin?, fallbackSrc? }.
-   */
-  function loadExternalScript(src, options = {}) {
-      const { integrity = null, crossorigin = null, fallbackSrc = null } = options;
-
-      const validSrc = validateScriptSrc(src);
-      if (!validSrc || loadedScripts.has(validSrc)) {
-          return; // Inválido (erro já logado) ou já tentado
-      }
-
-      loadedScripts.add(validSrc); // Marca como tentado
-
-      const validFallback = validateScriptSrc(fallbackSrc); // Valida fallback
-
-      const script = document.createElement('script');
-      script.src = validSrc;
-      script.defer = true;
-      if (integrity) {
-          script.integrity = integrity;
-          script.crossOrigin = crossorigin || 'anonymous'; // Padrão seguro para SRI
-      } else if (crossorigin) {
-          script.crossOrigin = crossorigin; // Permite se explícito
-      }
-
-      script.onerror = () => {
-          console.warn(`SEC_MOD: Failed load: ${validSrc}`);
-          if (validFallback && !loadedScripts.has(validFallback)) {
-               console.warn(`SEC_MOD: Trying fallback: ${validFallback}`);
-               const { fallbackSrc: _, ...restOptions } = options; // Evita loop
-               loadExternalScript(validFallback, restOptions);
-          }
-      };
-
-      if (document.head) {
-          document.head.appendChild(script);
-      } else {
-          console.error("SEC_MOD: Cannot load script - document.head missing.");
-          loadedScripts.delete(validSrc); // Limpa se falhou em adicionar
-      }
-  }
-
-  /**
-   * Define textContent seguro de um elemento, prevenindo injeção de HTML.
-   * @param {Element | null} element - Elemento DOM a modificar.
-   * @param {*} content - Conteúdo (será tratado como texto puro).
-   */
-  function safeSetTextContent(element, content) {
-      if (!(element instanceof Element)) {
-          // Log silencioso ou erro sutil é menos intrusivo que um erro alto aqui
-          // console.error('SEC_MOD: safeSetTextContent called with invalid element.');
-          return;
-      }
-      element.textContent = String(content ?? '');
-  }
-
-  /**
-   * Inicializa Trusted Types (se suportado). Executado na inicialização.
-   * @private
-   */
-  function initTrustedTypes() {
-     if (window.trustedTypes && window.trustedTypes.createPolicy) {
-         try {
-             window.trustedTypes.createPolicy('default', {
-                 // createHTML: Sempre escapar. HTML real requer sanitizador (ex: DOMPurify).
-                 createHTML: (string) => escapeHtml(string),
-
-                 // createScript: Permissivo, confia 100% na CSP (nonce/strict-dynamic).
-                 // @warning Bypass de proteção TT se CSP falhar.
-                 createScript: (string) => string,
-
-                 // createScriptURL: Valida a URL (HTTPS/relativo) antes de permitir.
-                 createScriptURL: (string) => {
-                     const sanitized = sanitizeURL(string, ALLOWED_SCRIPT_URL_PROTOCOLS);
-                     if (sanitized) {
-                         return sanitized; // Retorna URL validada
-                     }
-                     const errorMsg = `SEC_MOD (Trusted Types): Blocked script URL: ${string}`;
-                     console.error(errorMsg);
-                     throw new TypeError(errorMsg); // Bloqueia via TT
-                 }
-             }, /* allowDuplicatePolicy = */ true); // Permite recriar (útil p/ HMR)
-         } catch (e) {
-             if (!e.message.includes('Policy') || !e.message.includes('already exists')) {
-                console.error('SEC_MOD: Failed to initialize Trusted Types:', e);
-             }
-         }
-     }
-  }
-
-
-  // --- Inicialização Imediata do Módulo ---
-  try {
-      initTrustedTypes(); // Tenta inicializar TT primeiro
-      applyBasicCSP();    // Aplica CSP via meta tag
-
-      // --- Exposição da API Pública ---
-      window.securityModule = Object.freeze({ // Congela o objeto para imutabilidade
-           cleanText,
-           setSecureCookie,
-           loadExternalScript,
-           safeSetTextContent,
-           // Opcional: expor helpers se úteis externamente
-           cleanNumber,
-           escapeHtml,
-           // Não exportar: generateNonce, sanitizeURL, validateScriptSrc, applyBasicCSP, initTrustedTypes
-      });
-
-      window.__securityModuleLoaded = true; // Marca como carregado com SUCESSO
-      // console.info("SEC_MOD: Security module initialized successfully.");
-
-  } catch (initError) {
-      console.error("SEC_MOD: CRITICAL ERROR during initialization!", initError);
-      // Marca como carregado mesmo em erro para evitar retentativas que podem piorar
-      window.__securityModuleLoaded = true;
-  }
-
-})(); // Fim da IIFE
-
-
-
-
-/**
- * =============================================================================
- * securityEssentials.js - Módulo de Segurança Client-Side Essencial (KISS)
- * =============================================================================
- * Implementa proteções fundamentais de segurança front-end seguindo a filosofia
- * KISS (Keep It Simple, Stupid). Fornece ferramentas essenciais para:
- * - Prevenção de XSS (Cross-Site Scripting) via escape e textContent seguro
- * - Configuração automática de CSP (Content Security Policy) básica
- * - Carregamento seguro de scripts externos com SRI e validação de protocolo
- * - Sanitização e validação de entrada de dados (números, texto, URLs)
- * - Suporte a Trusted Types para navegadores modernos
- * - Utilitários seguros (cookie, seletor DOM)
- *
- * Uso: Inclua este script no <head> da sua página, antes de qualquer outro
- * script. As funções utilitárias estarão disponíveis no objeto global
- * `window.SecurityEssentials`. A CSP e Trusted Types (se suportado)
- * são aplicados automaticamente na carga do script.
- *
- * Aviso: Esta função é auto-executável e aplica CSP imediatamente.
- * =============================================================================
- */
-(function(window) {
-  // --- Bloco de Guarda: Previne re-execução ---
-  if (window.__securityEssentialsLoaded) {
-      console.warn("SECURITY ESSENTIALS: Módulo já carregado. Ignorando re-execução.");
-      return;
-  }
-  // --- Fim Bloco de Guarda ---
-
-  // Objeto para expor a API pública
-  const SecurityEssentials = {};
-
-/**
- * Mapa de caracteres para escapar em conteúdo HTML.
- * Cada caractere especial é mapeado para sua entidade HTML correspondente.
- * @private
- */
-  const HTML_ESCAPE_MAP = {
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;',
-    "'": '&#39;', // Usando Hex consistente
-    '`': '&#96;', // Usando Hex consistente
-    '/': '&#47;', // Usando Hex consistente
-    // Substitui LS/PS por espaço para prevenir quebra de strings JS e ataques baseados em caracteres Unicode
-    '\u2028': ' ', // Line Separator - pode quebrar strings JS e causar XSS se não tratado
-    '\u2029': ' '  // Paragraph Separator - mesmo problema do LS
-  };
-
-  /** @private Regex para caracteres de controle ASCII C0/C1 (exceto HT, LF, CR). */
-  const CONTROL_CHARS_REGEX = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
-
-  /** @private Lista de protocolos de URL seguros. */
-  const ALLOWED_PROTOCOLS = ['https:', 'http:', 'mailto:', 'ftp:']; // FTP opcional
-
-  /** @private Rastreia scripts já carregados/tentados para evitar duplicação. */
-  const loadedScripts = new Set();
-
-  // --- Funções Utilitárias Internas e Públicas ---
-
-  /**
-   * Escapa caracteres HTML especiais e separadores de linha/parágrafo Unicode.
-   * Função fundamental para prevenção de XSS ao inserir dados em HTML.
-   * @param {*} input - A entrada a ser escapada.
-   * @returns {string} - String segura para uso em contextos HTML.
-   */
-  function escapeHtml(input) {
-      const str = String(input ?? '');
-      // Adicionado '&' ao regex para corresponder ao mapa
-      return str.replace(/[&<>"'`/\u2028\u2029]/g, c => HTML_ESCAPE_MAP[c]);
-  }
-  SecurityEssentials.escapeHtml = escapeHtml; // Expor
-
-  /**
-   * Converte a entrada para um número (float) finito ou retorna null se inválido.
-   * Rejeita strings não numéricas ou infinitas/NaN.
-   * @param {*} input - A entrada a ser convertida para número.
-   * @returns {number | null} - Número validado ou null se inválido.
-   */
-  function cleanNumber(input) {
-      const strInput = String(input ?? '').trim();
-      if (strInput === '') return null; // Tratar string vazia explicitamente
-      const num = Number(strInput);
-      // Verifica se é um número finito (não NaN, Infinity, -Infinity)
-      return isFinite(num) ? num : null;
-  }
-  SecurityEssentials.cleanNumber = cleanNumber; // Expor
-
-  /**
-   * Limpa texto: remove espaços/etc. das pontas, opcionalmente remove
-   * caracteres de controle, e limita o comprimento máximo.
-   * @param {*} input - O valor a ser limpo.
-   * @param {number} [maxLength=1000] - O comprimento máximo desejado.
-   * @param {boolean} [removeControlChars=false] - Se true, remove caracteres de controle C0/C1 (exceto HT, LF, CR).
-   * @returns {string} - O texto limpo/sanitizado e limitado.
-   */
-  function cleanText(input, maxLength = 1000, removeControlChars = false) {
-      let str = String(input ?? '');
-      if (removeControlChars) {
-          str = str.replace(CONTROL_CHARS_REGEX, '');
-      }
-      str = str.trim();
-      // Garante que maxLength seja não-negativo
-      const effectiveMaxLength = Math.max(0, Math.floor(maxLength) || 1000);
-      return str.substring(0, effectiveMaxLength);
-  }
-  SecurityEssentials.cleanText = cleanText; // Expor
-
-  /**
-   * Sanitiza uma URL, permitindo apenas protocolos seguros pré-definidos ou URLs relativas.
-   * Retorna a URL original (trimada) se segura, ou null caso contrário.
-   * Foco principal: Prevenir XSS via protocolos como 'javascript:'.
-   * @param {*} inputUrl - A URL a ser sanitizada.
-   * @returns {string | null} - A URL original (trimada e validada) se segura, ou null.
-   */
-  function sanitizeURL(inputUrl) {
-      const urlString = String(inputUrl ?? '').trim();
-      if (!urlString) return null;
-
-      try {
-          // Usar location.href como base resolve URLs relativas corretamente
-          const parsedUrl = new URL(urlString, window.location.href);
-          const protocol = parsedUrl.protocol.toLowerCase();
-
-          if (ALLOWED_PROTOCOLS.includes(protocol)) {
-              return urlString; // Retorna a original trimada se o protocolo é permitido
-          } else {
-              // Trata URLs relativas (que herdam http/https da base) como seguras implicitamente
-              // Se a URL original era relativa E a base é http/https, o protocolo parseado estará OK.
-              // Se a URL parseada tem um protocolo não permitido (javascript:, data:, blob:, etc.) bloqueia.
-              console.warn(`SECURITY ESSENTIALS: Protocolo de URL bloqueado: ${protocol} em '${urlString}'`);
-              return null;
-          }
-      } catch (e) {
-          // Falha no new URL() indica formato inválido
-          console.warn(`SECURITY ESSENTIALS: Formato de URL inválido ou falha ao parsear: '${urlString}'`);
-          return null;
-      }
-  }
-  SecurityEssentials.sanitizeURL = sanitizeURL; // Expor
-
-  /**
-   * @private Gera um nonce criptograficamente seguro (32 bytes / 256 bits).
-   * @returns {string} - Nonce em formato hexadecimal ou 'CRYPTO_ERROR'.
-   */
-  function generateNonce() {
-      const buffer = new Uint8Array(32);
-      try {
-          window.crypto.getRandomValues(buffer);
-          // Converte para string hexadecimal
-          return Array.from(buffer, byte => byte.toString(16).padStart(2, '0')).join('');
-      } catch (e) {
-          console.error("SECURITY ESSENTIALS: Falha crítica - crypto.getRandomValues indisponível/falhou.", e);
-          return 'CRYPTO_ERROR';
-      }
-  }
-  // Não expor generateNonce diretamente, é detalhe de implementação da CSP
-
-  /**
-   * @private Aplica Content Security Policy (CSP) via meta tag automaticamente.
-   */
-  function applyBasicCSP() {
-      // Evita adicionar múltiplos CSPs via meta tag
-      if (document.querySelector('meta[http-equiv="Content-Security-Policy"]')) {
-          console.warn("SECURITY ESSENTIALS: Meta tag CSP já existe. Pulando aplicação automática.");
-          return;
-      }
-
-      const scriptNonce = generateNonce();
-      const styleNonce = generateNonce();
-      if (scriptNonce === 'CRYPTO_ERROR' || styleNonce === 'CRYPTO_ERROR') {
-          console.error("SECURITY ESSENTIALS: Não foi possível gerar nonce seguro. CSP não aplicada.");
-          return;
-      }
-
-      // Política CSP balanceada: segura mas permite recursos comuns
-      const cspPolicy = [
-          "default-src 'none'", // Padrão restritivo
-          "script-src 'self' 'strict-dynamic' 'nonce-" + scriptNonce + "' https:", // 'self', scripts via nonce, scripts carregados por scripts confiáveis, e HTTPS (para fallback ou CDNs sem nonce)
-          "style-src 'self' 'nonce-" + styleNonce + "' https://fonts.googleapis.com", // 'self', estilos via nonce, Google Fonts CSS
-          "font-src 'self' https://fonts.gstatic.com", // 'self', Google Fonts
-          "img-src 'self' https: data:", // 'self', HTTPS (genérico, pode restringir mais se necessário), data URIs
-          "connect-src 'self'", // APIs na mesma origem
-          "form-action 'self'", // Formulários enviam para mesma origem
-          "base-uri 'none'", // Previne <base> tag hijacking
-          "frame-ancestors 'none'", // Previne clickjacking
-          "object-src 'none'", // Bloqueia plugins (<object>, <embed>, <applet>)
-          (window.trustedTypes ? "require-trusted-types-for 'script';" : "") // Integração com Trusted Types
-      ].filter(Boolean).join('; ');
-
-      const meta = document.createElement('meta');
-      meta.httpEquiv = 'Content-Security-Policy';
-      meta.content = cspPolicy;
-
-      // Inserir no início do <head> para máxima eficácia
-      if (document.head) {
-          document.head.prepend(meta);
-      } else {
-          // Tenta inserir no <html> se <head> não estiver pronto (menos ideal)
-          const root = document.documentElement;
-          if (root) {
-              root.insertBefore(meta, root.firstChild);
-          } else {
-              console.error("SECURITY ESSENTIALS: Falha ao aplicar CSP - <head> ou <html> não encontrado.");
-              return; // Não conseguiu aplicar
-          }
-      }
-      //console.info("SECURITY ESSENTIALS: CSP básica aplicada via meta tag.");
-  }
-
-  /**
-   * Define cookie com atributos de segurança essenciais (SameSite=Strict, Secure).
-   * Nota: HttpOnly deve ser definido pelo servidor.
-   * @param {string} name - Nome do cookie.
-   * @param {*} value - Valor do cookie.
-   * @param {number} [days=7] - Duração em dias (0 para sessão).
-   * @param {string} [path='/'] - Path do cookie.
-   */
-  function setSecureCookie(name, value, days = 7, path = '/') {
-      if (typeof name !== 'string' || name.trim() === '') {
-          console.error('SECURITY ESSENTIALS: Nome do cookie inválido.'); return;
-      }
-      if (value === undefined || value === null) {
-          console.warn('SECURITY ESSENTIALS: Valor do cookie é undefined/null. Cookie será setado com valor vazio.');
-          value = ''; // Define como string vazia explicitamente
-      }
-      // Valida path - deve ser string e começar com '/' se não for vazio
-      let validPath = '/';
-      if (typeof path === 'string') {
-           if (path === '' || path.startsWith('/')) {
-               validPath = path;
-           } else {
-               console.warn(`SECURITY ESSENTIALS: Path do cookie inválido ('${path}'). Usando '/'.`);
-           }
-      }
-
-      let expiresAttribute = '';
-      if (typeof days === 'number' && days > 0) {
-          const date = new Date();
-          date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-          expiresAttribute = `; expires=${date.toUTCString()}`;
-      } else if (days === 0) {
-           // Cookie de sessão, não adiciona 'expires'
-      }
-
-      const secureAttribute = window.location.protocol === 'https:' ? '; Secure' : '';
-      // Encode nome e valor
-      const cookieString = `${encodeURIComponent(name)}=${encodeURIComponent(String(value))}${expiresAttribute}; path=${validPath}${secureAttribute}; SameSite=Strict`;
-
-      try {
-          document.cookie = cookieString;
-      } catch (e) {
-          console.error("SECURITY ESSENTIALS: Falha ao definir cookie.", e);
-      }
-      /* Lembrete: Configure HttpOnly no servidor! */
-  }
-  SecurityEssentials.setSecureCookie = setSecureCookie; // Expor
-
-  /**
-   * Carrega script externo com segurança: validação de protocolo (HTTPS/relativo),
-   * SRI, CORS e fallback.
-   * @param {string} src - URL do script principal (HTTPS ou relativo).
-   * @param {object} [options={}] - Opções.
-   * @param {string|null} [options.integrity=null] - Hash SRI (sha256/384/512).
-   * @param {'anonymous'|'use-credentials'|null} [options.crossorigin=null] - Modo CORS. ('anonymous' automático com integrity).
-   * @param {string|null} [options.fallbackSrc=null] - URL alternativa (HTTPS/relativo) se principal falhar.
-   */
-  function loadExternalScript(src, options = {}) {
-      const { integrity = null, crossorigin = null, fallbackSrc = null } = options;
-
-      const trimmedSrc = String(src ?? '').trim();
-      if (!trimmedSrc) {
-          console.error('SECURITY ESSENTIALS: URL do script inválida (vazia).'); return;
-      }
-
-      // Validação CRÍTICA de protocolo para scripts: Apenas HTTPS ou relativo/local
-      const isSrcAllowed = trimmedSrc.startsWith('https://') || trimmedSrc.startsWith('/') || trimmedSrc.startsWith('./') || trimmedSrc.startsWith('../');
-      if (!isSrcAllowed) {
-          console.error(`SECURITY ESSENTIALS: Protocolo/formato não permitido para script src: ${trimmedSrc}. Use apenas HTTPS ou caminhos relativos/locais.`);
-          return;
-      }
-
-      // Validar fallback da mesma forma
-      let validFallbackSrc = null;
-      const trimmedFallback = String(fallbackSrc ?? '').trim();
-      if (trimmedFallback) {
-          const isFallbackAllowed = trimmedFallback.startsWith('https://') || trimmedFallback.startsWith('/') || trimmedFallback.startsWith('./') || trimmedFallback.startsWith('../');
-          if (isFallbackAllowed) {
-              validFallbackSrc = trimmedFallback;
-          } else {
-              console.error(`SECURITY ESSENTIALS: Protocolo/formato não permitido para fallback de script: ${trimmedFallback}. Fallback ignorado.`);
-          }
-      }
-
-      // Evitar recarregar script (principal ou fallback)
-      if (loadedScripts.has(trimmedSrc)) {
-           //console.info(`SECURITY ESSENTIALS: Script já carregado ou em carregamento: ${trimmedSrc}`);
-           return;
-      }
-      loadedScripts.add(trimmedSrc); // Marcar como carregando/carregado
-
-      const crossOriginAttr = integrity ? (crossorigin || 'anonymous') : crossorigin;
-
-      if (!integrity && trimmedSrc.startsWith('https://')) {
-          console.warn(`SECURITY ESSENTIALS: Carregando script externo ${trimmedSrc} sem Subresource Integrity (SRI). Considere adicionar um hash de integridade.`);
-      }
-
-      const script = document.createElement('script');
-      script.src = trimmedSrc;
-      if (integrity) script.integrity = integrity;
-      if (crossOriginAttr) script.crossOrigin = crossOriginAttr;
-      script.defer = true; // Boa prática, executa após parse do HTML
-      // Async poderia ser uma opção, mas defer mantém a ordem relativa para scripts carregados assim
-      script.onerror = (event) => {
-          console.warn(`SECURITY ESSENTIALS: Falha ao carregar script ${trimmedSrc}`, event.type);
-          loadedScripts.delete(trimmedSrc); // Permite tentar novamente se necessário externamente? Ou mantém? Vamos manter pra evitar retentativas do mesmo script falho.
-
-          if (validFallbackSrc && !loadedScripts.has(validFallbackSrc)) {
-              console.warn(`SECURITY ESSENTIALS: Tentando fallback para ${validFallbackSrc}`);
-              // Chama recursivamente com o fallback, mantendo opções originais (exceto o próprio fallback)
-              loadExternalScript(validFallbackSrc, {
-                  integrity: options.integrity, // Reutiliza SRI se aplicável ao fallback
-                  crossorigin: options.crossorigin // Reutiliza crossorigin
-                  // Não passa fallbackSrc para evitar loop infinito
-              });
-          } else if (validFallbackSrc) {
-               console.warn(`SECURITY ESSENTIALS: Fallback ${validFallbackSrc} já tentado, inválido ou igual ao src original.`);
-          }
-      };
-
-      script.onload = () => {
-           //console.info(`SECURITY ESSENTIALS: Script ${trimmedSrc} carregado com sucesso.`);
-           // Poderia adicionar a validFallbackSrc a loadedScripts aqui também se o fallback foi usado?
-           // Não, porque a chamada recursiva já adiciona o fallbackSrc quando ela inicia.
-      };
-
-      // Adiciona ao head, que é o local preferido para scripts
-      if (document.head) {
-          document.head.appendChild(script);
-      } else {
-           console.error("SECURITY ESSENTIALS: Falha ao adicionar script - document.head não encontrado.");
-           loadedScripts.delete(trimmedSrc); // Remove da lista se não conseguiu adicionar
-      }
-  }
-  SecurityEssentials.loadExternalScript = loadExternalScript; // Expor
-
-  /**
-   * Valida se a entrada tem comprimento mínimo após trim.
-   * @param {*} input - Entrada a validar.
-   * @param {number} [minLength=1] - Comprimento mínimo exigido (padrão 1).
-   * @returns {boolean} - true se válido.
-   */
-  function validateMinLength(input, minLength = 1) {
-      const effectiveMinLength = Math.max(1, Math.floor(minLength) || 1);
-      return String(input ?? '').trim().length >= effectiveMinLength;
-  }
-  SecurityEssentials.validateMinLength = validateMinLength; // Expor
-
-  /**
-   * Obtém elemento do DOM com tratamento de erros para seletores inválidos.
-   * Retorna null se não encontrado ou se o seletor for inválido.
-   * @param {string} selector - Seletor CSS.
-   * @returns {HTMLElement | null} - Elemento encontrado ou null.
-   */
-  function getElement(selector) {
-      if (typeof selector !== 'string' || !selector) {
-          console.warn('SECURITY ESSENTIALS: Seletor inválido fornecido para getElement.');
-          return null;
-      }
-      try {
-          // querySelector retorna null se não encontrado, o que é ok.
-          return document.querySelector(selector);
-      } catch (error) {
-          // Erro geralmente por sintaxe inválida do seletor
-          console.error(`SECURITY ESSENTIALS: Erro ao buscar elemento com seletor '${selector}':`, error.message);
-          return null;
-      }
-  }
-  SecurityEssentials.getElement = getElement; // Expor
-
-  /**
-   * Define conteúdo de elemento de forma segura contra XSS usando `textContent`.
-   * @param {Element | null} element - Elemento a modificar (deve ser um Element Node).
-   * @param {*} content - Conteúdo a inserir (será tratado como texto puro).
-   */
-  function safeSetTextContent(element, content) {
-      // Verifica se é uma instância válida de Element
-      if (!(element instanceof Element)) {
-          if (element) {
-               console.error('SECURITY ESSENTIALS: safeSetTextContent chamado com objeto que não é um Element:', element);
-          } else {
-               console.error('SECURITY ESSENTIALS: safeSetTextContent chamado com elemento nulo ou inválido.');
-          }
-          return;
-      }
-      // Usar textContent é a forma segura de inserir texto sem interpretar HTML.
-      element.textContent = String(content ?? '');
-  }
-  SecurityEssentials.safeSetTextContent = safeSetTextContent; // Expor
-
-
-  /**
-   * @private Inicializa política Trusted Types para navegadores modernos.
-   */
-  function initTrustedTypes() {
-      if (window.trustedTypes && window.trustedTypes.createPolicy) {
-          try {
-              // Política 'default' para interceptar sinks comuns (innerHTML, script.src, etc.)
-              window.trustedTypes.createPolicy('default', {
-                  // createHTML: SEMPRE escapar. Para HTML real, use uma lib dedicada (DOMPurify)
-                  // em uma política específica, fora do escopo KISS deste módulo.
-                  createHTML: (string) => escapeHtml(string),
-
-                  // createScript: Passa direto, CONFIANDO na CSP (nonce, strict-dynamic) para bloquear
-                  // execução de scripts não autorizados. Se a CSP falhar, isso é um risco.
-                  // Alternativa mais segura: lançar erro aqui.
-                  createScript: (string) => {
-                      // console.warn("SECURITY ESSENTIALS (Trusted Types): createScript chamado. Execução depende da CSP.");
-                      return string; // Confia na CSP
-                  },
-
-                  // createScriptURL: Reutiliza nossa validação de URL.
-                  createScriptURL: (string) => {
-                      const sanitized = sanitizeURL(string);
-                      if (sanitized) {
-                          // Retorna a URL original (validada/trimada) como string
-                          return sanitized;
-                      }
-                      // Se inválida/insegura, lança erro conforme especificação TT
-                      const errorMsg = `SECURITY ESSENTIALS (Trusted Types): URL de script bloqueada (protocolo/formato inválido): ${string}`;
-                      console.error(errorMsg);
-                      throw new TypeError(errorMsg);
-                  }
-              }, /* allowDuplicatePolicy = */ true); // Permite recriar (útil em dev com HMR)
-
-              //console.info('SECURITY ESSENTIALS: Política Trusted Types "default" inicializada/atualizada.');
-
-          } catch (e) {
-              // Evita logar erro se a política 'default' já existia (comportamento normal sem allowDuplicate)
-              if (!(e instanceof DOMException && e.name === 'InvalidStateError') && !e.message.includes("Policy") && !e.message.includes("already exists")) {
-                 console.error('SECURITY ESSENTIALS: Falha ao inicializar Trusted Types:', e);
-              }
-          }
-      } else {
-           //console.info('SECURITY ESSENTIALS: Trusted Types não suportado ou desabilitado neste navegador.');
-      }
-  }
-
-  // --- Inicialização Imediata ---
-  try {
-      // 1. Inicializa Trusted Types (se disponível) - Prepara as defesas antes
-      initTrustedTypes();
-
-      // 2. Aplica a CSP via meta tag - Define as regras de rede e execução
-      applyBasicCSP();
-
-      // 3. Expor API no objeto global
-      window.SecurityEssentials = SecurityEssentials;
-
-      // 4. Marcar como carregado
-      window.__securityEssentialsLoaded = true;
-      //console.info("SECURITY ESSENTIALS: Módulo de segurança inicializado com sucesso.");
-
-  } catch (initError) {
-      console.error("SECURITY ESSENTIALS: Erro crítico durante a inicialização!", initError);
-      // Marcar como carregado mesmo em erro para evitar tentativas repetidas
-      window.__securityEssentialsLoaded = true;
-  }
-
-})(window); // Passa o objeto window para a IIFE
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Jogo da Velha Divertido</title>
+    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            background-color: #f0f0f0;
+            font-family: 'Press Start 2P', cursive;
+        }
+        h1 {
+            margin-bottom: 20px;
+            color: #ff6b81;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        #modoJogo {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        #modoJogo button {
+            margin: 0 10px;
+        }
+        #tabuleiro {
+            display: grid;
+            grid-template-columns: repeat(3, 100px);
+            grid-template-rows: repeat(3, 100px);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .celula {
+            width: 100px;
+            height: 100px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2em;
+            cursor: pointer;
+            border: 4px solid #4CAF50;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            background-color: #ffffff;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+        }
+        .celula:hover {
+            background-color: #f0f0f0;
+            transform: scale(1.05);
+            box-shadow: 3px 3px 7px rgba(0,0,0,0.15);
+        }
+        .celula.X {
+            color: #ff6b81;
+        }
+        .celula.O {
+            color: #42a5f5;
+        }
+        .celula.desaparecer {
+            animation: explode 0.5s forwards;
+        }
+        @keyframes explode {
+            0% {
+                opacity: 1;
+                transform: scale(1);
+            }
+            50% {
+                opacity: 0.5;
+                transform: scale(1.5);
+            }
+            100% {
+                opacity: 0;
+                transform: scale(0);
+            }
+        }
+        #mensagem {
+            font-size: 1.4em;
+            color: #333;
+            margin-bottom: 20px;
+            min-height: 1.6em;
+            text-align: center;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 0.9em;
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 25px;
+            box-shadow: 0px 8px 15px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease 0s;
+            font-family: 'Press Start 2P', cursive;
+            outline: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 150px;
+        }
+        button:hover {
+            background-color: #388E3C;
+            box-shadow: 0px 15px 20px rgba(46, 229, 157, 0.4);
+            transform: translateY(-3px);
+        }
+        button:active {
+            transform: translateY(1px);
+            box-shadow: 0px 2px 5px rgba(0, 0, 0, 0.2);
+        }
+        button:disabled {
+            background: linear-gradient(to bottom, #A5D6A7, #81C784);
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+            text-shadow: none;
+        }
+        .selecionado {
+            background: linear-gradient(to bottom, #00897B, #00695C);
+            box-shadow: 0 0 10px rgba(0,0,0,0.5);
+        }
+        .centro {
+            background-color: #FFFFE0;
+            color: #8B4513;
+        }
+        #historico {
+            margin-top: 20px;
+            font-size: 0.8em;
+            color: #555;
+            text-align: center;
+        }
+    </style>
+    <script src="https://unpkg.com/tone"></script>
+    <script>
+        // Efeitos sonoros usando Tone.js
+        const somClique = new Tone.Synth({
+            oscillator: { type: 'triangle' },
+            envelope: { attack: 0.01, decay: 0.1, sustain: 0, release: 0.2 }
+        }).toDestination();
+        const somExplosao = new Tone.Synth({
+            oscillator: { type: 'square' },
+            envelope: { attack: 0.001, decay: 0.1, sustain: 0.01, release: 0.1 }
+        }).toDestination();
+        const somVitoria = new Tone.PluckSynth().toDestination();
+        const somCentro = new Tone.Synth({
+            oscillator: { type: 'sine' },
+            envelope: { attack: 0.005, decay: 0.1, sustain: 0.3, release: 1 }
+        }).toDestination();
+        function tocarClique() {
+            somClique.triggerAttackRelease("C5", "8n");
+        }
+        function tocarExplosao() {
+            const synth = new Tone.Synth().toDestination();
+            const now = Tone.now();
+            synth.triggerAttackRelease("C4", "8n", now);
+            synth.triggerAttackRelease("E4", "8n", now + 0.1);
+            synth.triggerAttackRelease("G4", "8n", now + 0.2);
+            synth.triggerAttackRelease("C5", "16n", now + 0.3);
+        }
+        function tocarVitoria() {
+            somVitoria.triggerAttackRelease("C6", "4n");
+        }
+        function tocarCentro() {
+             somCentro.triggerAttackRelease("E4", "4n");
+        }
+    </script>
+</head>
+<body>
+    <h1>Jogo da Velha</h1>
+    <div id="modoJogo">
+        <button data-modo="humano">Humano vs Humano</button>
+        <button data-modo="computador">Humano vs Computador</button>
+    </div>
+    <div id="tabuleiro">
+        <div class="celula" data-pos="0"></div>
+        <div class="celula" data-pos="1"></div>
+        <div class="celula" data-pos="2"></div>
+        <div class="celula" data-pos="3"></div>
+        <div class="celula" data-pos="4" id="centro"></div>
+        <div class="celula" data-pos="5"></div>
+        <div class="celula" data-pos="6"></div>
+        <div class="celula" data-pos="7"></div>
+        <div class="celula" data-pos="8"></div>
+    </div>
+    <div id="mensagem"></div>
+    <button id="reiniciar" disabled>Reiniciar</button>
+    <div id="historico">Histórico de Jogadas: <br> X: [] <br> O: []</div>
+    <script>
+        const tabuleiroElement = document.getElementById('tabuleiro');
+        const celulas = document.querySelectorAll('.celula');
+        const mensagemElement = document.getElementById('mensagem');
+        const reiniciarButton = document.getElementById('reiniciar');
+        const modoJogoElement = document.getElementById('modoJogo');
+        const modoHumanoButton = modoJogoElement.querySelector('[data-modo="humano"]');
+        const modoComputadorButton = modoJogoElement.querySelector('[data-modo="computador"]');
+        const celulaCentro = document.getElementById('centro');
+        let tabuleiro = ['', '', '', '', '', '', '', '', ''];
+        let jogadorAtual = 'X';
+        let jogadas = 0;
+        let jogoTerminado = false;
+        let modoJogo = 'humano';
+        let historicoJogadas = [[], []];
+        let jogadasReais = 0;
+        const historicoElement = document.getElementById('historico');
+        modoHumanoButton.addEventListener('click', () => {
+            modoJogo = 'humano';
+            modoHumanoButton.classList.add('selecionado');
+            modoComputadorButton.classList.remove('selecionado');
+            reiniciarJogo();
+            tocarClique();
+        });
+        modoComputadorButton.addEventListener('click', () => {
+            modoJogo = 'computador';
+            modoComputadorButton.classList.add('selecionado');
+            modoHumanoButton.classList.remove('selecionado');
+            reiniciarJogo();
+            tocarClique();
+        });
+        modoHumanoButton.classList.add('selecionado');
+        celulas.forEach(celula => {
+            celula.addEventListener('click', () => tratarClique(celula));
+        });
+        reiniciarButton.addEventListener('click', () => {
+            reiniciarJogo();
+            tocarClique();
+        });
+        function tratarClique(celulaClicada) {
+            if (jogoTerminado) return;
+            const pos = parseInt(celulaClicada.dataset.pos);
+            if (tabuleiro[pos] !== '') {
+                mensagemElement.textContent = "Essa célula já está ocupada!";
+                return;
+            }
+            tocarClique();
+            if (pos === 4) {
+                tocarCentro();
+                celulaClicada.classList.add('centro');
+            }
+            tabuleiro[pos] = jogadorAtual;
+            celulaClicada.textContent = jogadorAtual;
+            celulaClicada.classList.add(jogadorAtual);
+            historicoJogadas[jogadorAtual === 'X' ? 0 : 1].push(pos);
+            jogadas++;
+            jogadasReais++;
+            atualizarHistorico();
+            if (historicoJogadas[jogadorAtual === 'X' ? 0 : 1].length > 3) {
+                let indiceDesaparecer = historicoJogadas[jogadorAtual === 'X' ? 0 : 1][0]; // Sempre remove o primeiro
+                historicoJogadas[jogadorAtual === 'X' ? 0 : 1].shift(); // Remove do array
+                const celulaDesaparecer = document.querySelector(`[data-pos="${indiceDesaparecer}"]`);
+                celulaDesaparecer.classList.add('desaparecer');
+                tocarExplosao();
+                tabuleiro[indiceDesaparecer] = '';
+                setTimeout(() => {
+                    celulaDesaparecer.textContent = '';
+                    celulaDesaparecer.classList.remove('desaparecer');
+                }, 500);
+                atualizarHistorico();
+            }
+            const vencedor = verificarVencedor();
+            if (vencedor) {
+                jogoTerminado = true;
+                mensagemElement.textContent = `Jogador ${vencedor} venceu!`;
+                reiniciarButton.disabled = false;
+                tocarVitoria();
+                return;
+            }
+            jogadorAtual = jogadorAtual === 'X' ? 'O' : 'X';
+            mensagemElement.textContent = `Vez do jogador ${jogadorAtual}`;
+            if (modoJogo === 'computador' && jogadorAtual === 'O' && !jogoTerminado) {
+                setTimeout(jogadaComputador, 500);
+            }
+        }
+        function jogadaComputador() {
+            let melhorJogada = encontrarMelhorJogada();
+            if (melhorJogada !== null) {
+                tocarClique();
+                if (melhorJogada === 4) {
+                    tocarCentro();
+                }
+                tabuleiro[melhorJogada] = 'O';
+                const celulaComputador = document.querySelector(`[data-pos="${melhorJogada}"]`);
+                celulaComputador.textContent = 'O';
+                celulaComputador.classList.add('O');
+                historicoJogadas[1].push(melhorJogada);
+                jogadas++;
+                jogadasReais++;
+                atualizarHistorico();
+                if (historicoJogadas[1].length > 3) {
+                    let indiceDesaparecer = historicoJogadas[1][0];
+                    historicoJogadas[1].shift();
+                    const celulaDesaparecer = document.querySelector(`[data-pos="${indiceDesaparecer}"]`);
+                    celulaDesaparecer.classList.add('desaparecer');
+                    tocarExplosao();
+                    tabuleiro[indiceDesaparecer] = '';
+                    setTimeout(() => {
+                        celulaDesaparecer.textContent = '';
+                        celulaDesaparecer.classList.remove('desaparecer');
+                    }, 500);
+                    atualizarHistorico();
+                }
+                const vencedor = verificarVencedor();
+                if (vencedor) {
+                    jogoTerminado = true;
+                    mensagemElement.textContent = `Jogador ${vencedor} venceu!`;
+                    reiniciarButton.disabled = false;
+                    tocarVitoria();
+                    return;
+                }
+                jogadorAtual = 'X';
+                mensagemElement.textContent = `Vez do jogador ${jogadorAtual}`;
+            }
+        }
+        function encontrarMelhorJogada() {
+            let melhorPontuacao = -Infinity;
+            let melhorJogada = null;
+            for (let i = 0; i < 9; i++) {
+                if (tabuleiro[i] === '') {
+                    tabuleiro[i] = 'O';
+                    let pontuacao = minimax(tabuleiro, 0, false);
+                    tabuleiro[i] = '';
+                    if (pontuacao > melhorPontuacao) {
+                        melhorPontuacao = pontuacao;
+                        melhorJogada = i;
+                    }
+                }
+            }
+            return melhorJogada;
+        }
+        function minimax(tabuleiro, profundidade, vezDoMax) {
+            const vencedor = verificarVencedor();
+            if (vencedor === 'X') return -10 + profundidade;
+            if (vencedor === 'O') return 10 - profundidade;
+            if (vezDoMax) {
+                let melhorPontuacao = -Infinity;
+                for (let i = 0; i < 9; i++) {
+                    if (tabuleiro[i] === '') {
+                        tabuleiro[i] = 'O';
+                        let pontuacao = minimax(tabuleiro, profundidade + 1, false);
+                        tabuleiro[i] = '';
+                        melhorPontuacao = Math.max(pontuacao, melhorPontuacao);
+                    }
+                }
+                return melhorPontuacao;
+            } else {
+                let melhorPontuacao = Infinity;
+                for (let i = 0; i < 9; i++) {
+                    if (tabuleiro[i] === '') {
+                        tabuleiro[i] = 'X';
+                        let pontuacao = minimax(tabuleiro, profundidade + 1, true);
+                        tabuleiro[i] = '';
+                        melhorPontuacao = Math.min(pontuacao, melhorPontuacao);
+                    }
+                }
+                return melhorPontuacao;
+            }
+        }
+        function verificarVencedor() {
+            const combinacoesVencedoras = [
+                [0, 1, 2], [3, 4, 5], [6, 7, 8],
+                [0, 3, 6], [1, 4, 7], [2, 5, 8],
+                [0, 4, 8], [2, 4, 6]
+            ];
+            for (let combinacao of combinacoesVencedoras) {
+                const [a, b, c] = combinacao;
+                if (tabuleiro[a] && tabuleiro[a] === tabuleiro[b] && tabuleiro[a] === tabuleiro[c]) {
+                    return tabuleiro[a];
+                }
+            }
+            return null;
+        }
+        function reiniciarJogo() {
+            tabuleiro = ['', '', '', '', '', '', '', '', ''];
+            jogadorAtual = 'X';
+            jogadas = 0;
+            jogoTerminado = false;
+            mensagemElement.textContent = '';
+            celulas.forEach(celula => {
+                celula.textContent = '';
+                celula.classList.remove('X', 'O', 'centro');
+            });
+            reiniciarButton.disabled = true;
+            historicoJogadas = [[], []];
+            atualizarHistorico();
+            if (modoJogo === 'computador' && jogadorAtual === 'O') {
+                setTimeout(jogadaComputador, 500);
+            }
+        }
+        function atualizarHistorico() {
+            historicoElement.innerHTML = `Histórico de Jogadas: <br> X: [${historicoJogadas[0].join(', ')}] <br> O: [${historicoJogadas[1].join(', ')}]`;
+        }
+    </script>
+</body>
+</html>
