@@ -1,7 +1,5 @@
 # securityWebTest
 
-# securityWebTest
-
 ## Introdução
 
 O securityWebTest é um projeto dedicado a demonstrar e testar as funcionalidades do `securityUtils.mjs`, um módulo JavaScript focado em sanitização de entradas e utilidades de segurança do lado do cliente. O objetivo principal é fornecer ferramentas para limpar e validar dados de entrada, ajudando a prevenir vulnerabilidades comuns como Cross-Site Scripting (XSS). O projeto inclui uma página de teste interativa (`index.html`) que utiliza um arquivo de casos de teste (`testList.html`) para verificar o comportamento das funções de sanitização.
